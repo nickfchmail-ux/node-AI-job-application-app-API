@@ -1,0 +1,17 @@
+# Windows null device accidentally created as a file
+nul
+
+# Local debug scripts
+debug-*.ts
+debug-*.png
+
+# Local env and tokens
+.env.local
+token.txt
+jobid.txt
+
+# Results (large JSON, not needed at runtime)
+results/
+
+# Dev artifacts
+*.log

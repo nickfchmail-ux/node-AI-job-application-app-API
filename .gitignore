@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env.local
+.env
+browser-state.json
+
+# Sensitive / ephemeral runtime files
+token.txt
+login.json
+jobid.txt
+jobstatus.json
+results/
+resume/
+-H

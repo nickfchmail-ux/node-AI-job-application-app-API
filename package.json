@@ -1,0 +1,36 @@
+{
+  "name": "jobsautomation",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "scrape": "ts-node src/scraper.ts",
+    "login": "ts-node src/login.ts",
+    "enrich": "ts-node src/enrichJobs.ts",
+    "cover": "ts-node src/coverLetter.ts",
+    "migrate": "ts-node src/migrate.ts",
+    "start": "ts-node src/server.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.98.0",
+    "@types/cheerio": "^0.22.35",
+    "@types/node": "^25.3.3",
+    "@types/pdf-parse": "^1.1.5",
+    "axios": "^1.13.6",
+    "cheerio": "^1.2.0",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "mammoth": "^1.11.0",
+    "pdf-parse": "^2.4.5",
+    "playwright": "^1.58.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6"
+  }
+}
