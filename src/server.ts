@@ -87,9 +87,38 @@ app.post("/auth/login", async (req: Request, res: Response) => {
     }
     res.json({
       access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
       token_type: "Bearer",
       expires_in: data.session.expires_in,
       user: { id: data.user.id, email: data.user.email },
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── POST /auth/refresh ──────────────────────────────────────────────────────
+app.post("/auth/refresh", async (req: Request, res: Response) => {
+  const { refresh_token } = req.body as { refresh_token?: string };
+  if (!refresh_token) {
+    res.status(400).json({ error: "refresh_token is required" });
+    return;
+  }
+  try {
+    const supabase = getAnonSupabaseClient();
+    const { data, error } = await supabase.auth.refreshSession({
+      refresh_token,
+    });
+    if (error || !data.session) {
+      res.status(401).json({ error: error?.message ?? "Token refresh failed" });
+      return;
+    }
+    res.json({
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+      token_type: "Bearer",
+      expires_in: data.session.expires_in,
+      user: { id: data.user!.id, email: data.user!.email },
     });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -213,7 +242,8 @@ const PORT = process.env.PORT ?? 3000;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log("POST /auth/register  { email, password }");
-  console.log("POST /auth/login     { email, password }  → access_token");
+  console.log("POST /auth/login     { email, password }  → access_token + refresh_token");
+  console.log("POST /auth/refresh   { refresh_token }     → new access_token + refresh_token");
   console.log(
     "POST /scrape         { keyword, pages?, force? }  [Bearer token required] → { jobId }",
   );
