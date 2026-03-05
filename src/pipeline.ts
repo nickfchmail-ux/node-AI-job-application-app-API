@@ -565,7 +565,7 @@ async function analyzeOne(
     `  "fit": true or false,\n` +
     `  "score": integer from 0 to 100,\n` +
     `  "reasons": ["reason 1", "reason 2", ...],\n` +
-    `  "expectedSalary": "e.g. HK$18,000 – HK$22,000 per month  (ONLY when fit is true)",\n` +
+    `  "expectedSalary": "please access based on the market rate for the title in hong kong, and the acedemic background, qulifications and exprience inside the resume",\n` +
     `  "coverLetter": "full cover letter text  (ONLY when fit is true)"\n` +
     `}\n\n` +
     `Rules:\n` +
