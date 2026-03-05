@@ -760,6 +760,43 @@ export interface PipelineResult {
   jobs: AnalysedJob[];
 }
 
+/**
+ * Query Supabase for jobs that have already been analysed for this user (by URL).
+ * Returns a map of url → FitAnalysis so the pipeline can skip DeepSeek for those.
+ */
+async function fetchExistingAnalyses(
+  urls: string[],
+  userId: string,
+): Promise<Map<string, FitAnalysis>> {
+  if (!urls.length) return new Map();
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("jobs")
+    .select("url, fit, fit_score, fit_reasons, cover_letter, expected_salary")
+    .eq("user_id", userId)
+    .in("url", urls)
+    .not("fit", "is", null);
+
+  if (error || !data) return new Map();
+
+  const map = new Map<string, FitAnalysis>();
+  for (const row of data) {
+    const reasons: string[] = Array.isArray(row.fit_reasons)
+      ? (row.fit_reasons as string[])
+      : [];
+    if (row.fit !== null && reasons.length > 0) {
+      map.set(row.url as string, {
+        fit: row.fit as boolean,
+        score: (row.fit_score as number) ?? 0,
+        reasons,
+        coverLetter: (row.cover_letter as string | null) ?? undefined,
+        expectedSalary: (row.expected_salary as string | null) ?? undefined,
+      });
+    }
+  }
+  return map;
+}
+
 export async function runPipeline(
   opts: PipelineOptions,
 ): Promise<PipelineResult> {
@@ -805,9 +842,25 @@ export async function runPipeline(
   log(`\n── Phase 2: Enriching ${uniqueJobs.length} jobs ──`);
   const enriched = await enrichJobs(uniqueJobs, log);
 
-  // 4. Analyse
+  // 4. Analyse — reuse stored results from Supabase where available
   log(`\n── Phase 3: Analysing fit with DeepSeek ──`);
-  const analysed = await analyzeJobs(enriched, resumeText, force, log);
+  let toAnalyse: AnalysedJob[] = enriched.map((j) => ({ ...j }));
+  if (userId && !force) {
+    const existingMap = await fetchExistingAnalyses(
+      enriched.map((j) => j.url),
+      userId,
+    );
+    if (existingMap.size > 0) {
+      log(
+        `⏭  Found ${existingMap.size} previously analysed job(s) in Supabase — skipping DeepSeek for those.`,
+      );
+      toAnalyse = enriched.map((j) => ({
+        ...j,
+        ...(existingMap.has(j.url) ? { fitAnalysis: existingMap.get(j.url) } : {}),
+      }));
+    }
+  }
+  const analysed = await analyzeJobs(toAnalyse, resumeText, force, log);
 
   // 5. Save to file
   const filePath = saveToFile(analysed, safeKeyword, scrapedDate);
