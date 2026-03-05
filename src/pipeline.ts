@@ -760,26 +760,32 @@ async function fetchExistingJobs(
   if (!urls.length) return new Map();
   const supabase = getSupabaseClient();
   log(`[cache] Querying Supabase for ${urls.length} URL(s) under user ${userId}...`);
-  const { data, error } = await supabase
-    .from("jobs")
-    .select(
-      "url, title, company, location, salary, posted_date, short_description, responsibilities, requirements, benefits, skills, employment_type, experience_level, about_company, raw_description, fit, fit_score, fit_reasons, cover_letter, expected_salary",
-    )
-    .eq("user_id", userId)
-    .in("url", urls);
+  log(`[cache] Sample URLs: ${urls.slice(0, 2).join(" | ")}`);
 
-  if (error) {
-    log(`[cache] Supabase query error: ${error.message}`);
-    return new Map();
+  // Chunk into batches of 20 to avoid query string length limits on .in()
+  const CHUNK = 20;
+  const allRows: Record<string, unknown>[] = [];
+  for (let i = 0; i < urls.length; i += CHUNK) {
+    const chunk = urls.slice(i, i + CHUNK);
+    const { data, error } = await supabase
+      .from("jobs")
+      .select(
+        "url, title, company, location, salary, posted_date, short_description, responsibilities, requirements, benefits, skills, employment_type, experience_level, about_company, raw_description, fit, fit_score, fit_reasons, cover_letter, expected_salary",
+      )
+      .eq("user_id", userId)
+      .in("url", chunk);
+
+    if (error) {
+      log(`[cache] Supabase query error (chunk ${i / CHUNK + 1}): ${error.message}`);
+      continue;
+    }
+    if (data) allRows.push(...(data as Record<string, unknown>[]));
   }
-  if (!data) {
-    log(`[cache] Supabase returned no data.`);
-    return new Map();
-  }
-  log(`[cache] Found ${data.length} existing row(s) in Supabase.`);
+
+  log(`[cache] Found ${allRows.length} existing row(s) in Supabase.`);
 
   const map = new Map<string, AnalysedJob>();
-  for (const row of data as Record<string, unknown>[]) {
+  for (const row of allRows) {
     const reasons: string[] = Array.isArray(row.fit_reasons)
       ? (row.fit_reasons as string[])
       : [];
