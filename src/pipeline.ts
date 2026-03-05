@@ -650,20 +650,8 @@ export async function analyzeJobs(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Phase 4 – Persist (local file + Supabase)
+// Phase 4 – Persist (Supabase only)
 // ─────────────────────────────────────────────────────────────────────────────
-
-export function saveToFile(
-  jobs: AnalysedJob[],
-  keyword: string,
-  scrapedDate: string,
-): string {
-  const dir = path.join(process.cwd(), "results", scrapedDate);
-  fs.mkdirSync(dir, { recursive: true });
-  const filePath = path.join(dir, `${keyword}_enriched.json`);
-  fs.writeFileSync(filePath, JSON.stringify(jobs, null, 2), "utf-8");
-  return filePath;
-}
 
 function toRow(
   job: AnalysedJob,
@@ -756,7 +744,6 @@ export interface PipelineResult {
   scrapedDate: string;
   total: number;
   fit: number;
-  filePath: string;
   jobs: AnalysedJob[];
 }
 
@@ -899,18 +886,12 @@ export async function runPipeline(
     analysed = [...freshAnalysed, ...cachedJobs];
   }
 
-  const filePath = newJobs.length > 0
-    ? saveToFile(analysed.filter((j) => newJobs.some((n) => n.url === j.url)), safeKeyword, scrapedDate)
-    : "(all cached)";
-  if (newJobs.length > 0) log(`\nSaved locally to: ${filePath}`);
-
   const fit = analysed.filter((j) => j.fitAnalysis?.fit).length;
   return {
     keyword: safeKeyword,
     scrapedDate,
     total: analysed.length,
     fit,
-    filePath: filePath,
     jobs: analysed,
   };
 }
