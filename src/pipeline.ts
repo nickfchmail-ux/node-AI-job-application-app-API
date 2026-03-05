@@ -762,37 +762,59 @@ export interface PipelineResult {
 
 /**
  * Query Supabase for jobs that have already been analysed for this user (by URL).
- * Returns a map of url → FitAnalysis so the pipeline can skip DeepSeek for those.
+ * Returns a map of url → AnalysedJob so already-processed jobs can be excluded
+ * from enrichment, DeepSeek analysis, and upserting entirely.
  */
-async function fetchExistingAnalyses(
+async function fetchExistingJobs(
   urls: string[],
   userId: string,
-): Promise<Map<string, FitAnalysis>> {
+): Promise<Map<string, AnalysedJob>> {
   if (!urls.length) return new Map();
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("jobs")
-    .select("url, fit, fit_score, fit_reasons, cover_letter, expected_salary")
+    .select(
+      "url, title, company, location, salary, posted_date, short_description, responsibilities, requirements, benefits, skills, employment_type, experience_level, about_company, raw_description, fit, fit_score, fit_reasons, cover_letter, expected_salary",
+    )
     .eq("user_id", userId)
     .in("url", urls)
     .not("fit", "is", null);
 
   if (error || !data) return new Map();
 
-  const map = new Map<string, FitAnalysis>();
-  for (const row of data) {
+  const map = new Map<string, AnalysedJob>();
+  for (const row of data as Record<string, unknown>[]) {
     const reasons: string[] = Array.isArray(row.fit_reasons)
       ? (row.fit_reasons as string[])
       : [];
-    if (row.fit !== null && reasons.length > 0) {
-      map.set(row.url as string, {
+    if (row.fit === null || reasons.length === 0) continue;
+    const job: AnalysedJob = {
+      title: row.title as string,
+      company: row.company as string,
+      location: row.location as string,
+      url: row.url as string,
+      salary: (row.salary as string | null) ?? undefined,
+      postedDate: (row.posted_date as string | null) ?? undefined,
+      description: (row.short_description as string | null) ?? undefined,
+      jobDetail: {
+        responsibilities: (row.responsibilities as string[]) ?? [],
+        requirements: (row.requirements as string[]) ?? [],
+        benefits: (row.benefits as string[]) ?? [],
+        skills: (row.skills as string[]) ?? [],
+        employmentType: (row.employment_type as string | null) ?? undefined,
+        experienceLevel: (row.experience_level as string | null) ?? undefined,
+        aboutCompany: (row.about_company as string | null) ?? undefined,
+        rawDescription: (row.raw_description as string) ?? "",
+      },
+      fitAnalysis: {
         fit: row.fit as boolean,
         score: (row.fit_score as number) ?? 0,
         reasons,
         coverLetter: (row.cover_letter as string | null) ?? undefined,
         expectedSalary: (row.expected_salary as string | null) ?? undefined,
-      });
-    }
+      },
+    };
+    map.set(row.url as string, job);
   }
   return map;
 }
@@ -838,37 +860,49 @@ export async function runPipeline(
   if (uniqueJobs.length === 0)
     throw new Error("No jobs found for this keyword.");
 
-  // 3. Enrich
-  log(`\n── Phase 2: Enriching ${uniqueJobs.length} jobs ──`);
-  const enriched = await enrichJobs(uniqueJobs, log);
-
-  // 4. Analyse — reuse stored results from Supabase where available
-  log(`\n── Phase 3: Analysing fit with DeepSeek ──`);
-  let toAnalyse: AnalysedJob[] = enriched.map((j) => ({ ...j }));
+  // Filter out jobs already processed for this user — skip enrich, DeepSeek, and upsert
+  let newJobs = uniqueJobs;
+  let cachedJobs: AnalysedJob[] = [];
   if (userId && !force) {
-    const existingMap = await fetchExistingAnalyses(
-      enriched.map((j) => j.url),
+    const existingMap = await fetchExistingJobs(
+      uniqueJobs.map((j) => j.url),
       userId,
     );
     if (existingMap.size > 0) {
       log(
-        `⏭  Found ${existingMap.size} previously analysed job(s) in Supabase — skipping DeepSeek for those.`,
+        `⏭  ${existingMap.size} job(s) already in Supabase — skipping enrich, DeepSeek, and upsert for those.`,
       );
-      toAnalyse = enriched.map((j) => ({
-        ...j,
-        ...(existingMap.has(j.url) ? { fitAnalysis: existingMap.get(j.url) } : {}),
-      }));
+      newJobs = uniqueJobs.filter((j) => !existingMap.has(j.url));
+      cachedJobs = uniqueJobs
+        .filter((j) => existingMap.has(j.url))
+        .map((j) => existingMap.get(j.url)!);
     }
   }
-  const analysed = await analyzeJobs(toAnalyse, resumeText, force, log);
 
-  // 5. Save to file
-  const filePath = saveToFile(analysed, safeKeyword, scrapedDate);
-  log(`\nSaved locally to: ${filePath}`);
+  let analysed: AnalysedJob[];
+  if (newJobs.length === 0) {
+    log(`\nAll scraped jobs are already processed. Nothing new to do.`);
+    analysed = cachedJobs;
+  } else {
+    // 3. Enrich only new jobs
+    log(`\n── Phase 2: Enriching ${newJobs.length} new job(s) ──`);
+    const enriched = await enrichJobs(newJobs, log);
 
-  // 6. Upsert to Supabase
-  log(`\n── Phase 4: Uploading to Supabase ──`);
-  await upsertToSupabase(analysed, safeKeyword, scrapedDate, log, userId);
+    // 4. Analyse only new jobs with DeepSeek
+    log(`\n── Phase 3: Analysing fit with DeepSeek ──`);
+    const freshAnalysed = await analyzeJobs(enriched, resumeText, force, log);
+
+    // 5. Upsert only new jobs to Supabase
+    log(`\n── Phase 4: Uploading to Supabase ──`);
+    await upsertToSupabase(freshAnalysed, safeKeyword, scrapedDate, log, userId);
+
+    analysed = [...freshAnalysed, ...cachedJobs];
+  }
+
+  const filePath = newJobs.length > 0
+    ? saveToFile(analysed.filter((j) => newJobs.some((n) => n.url === j.url)), safeKeyword, scrapedDate)
+    : "(all cached)";
+  if (newJobs.length > 0) log(`\nSaved locally to: ${filePath}`);
 
   const fit = analysed.filter((j) => j.fitAnalysis?.fit).length;
   return {
@@ -876,7 +910,7 @@ export async function runPipeline(
     scrapedDate,
     total: analysed.length,
     fit,
-    filePath,
+    filePath: filePath,
     jobs: analysed,
   };
 }
