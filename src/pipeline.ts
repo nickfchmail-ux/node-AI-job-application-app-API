@@ -755,9 +755,11 @@ export interface PipelineResult {
 async function fetchExistingJobs(
   urls: string[],
   userId: string,
+  log: (msg: string) => void,
 ): Promise<Map<string, AnalysedJob>> {
   if (!urls.length) return new Map();
   const supabase = getSupabaseClient();
+  log(`[cache] Querying Supabase for ${urls.length} URL(s) under user ${userId}...`);
   const { data, error } = await supabase
     .from("jobs")
     .select(
@@ -766,7 +768,15 @@ async function fetchExistingJobs(
     .eq("user_id", userId)
     .in("url", urls);
 
-  if (error || !data) return new Map();
+  if (error) {
+    log(`[cache] Supabase query error: ${error.message}`);
+    return new Map();
+  }
+  if (!data) {
+    log(`[cache] Supabase returned no data.`);
+    return new Map();
+  }
+  log(`[cache] Found ${data.length} existing row(s) in Supabase.`);
 
   const map = new Map<string, AnalysedJob>();
   for (const row of data as Record<string, unknown>[]) {
@@ -852,6 +862,7 @@ export async function runPipeline(
     const existingMap = await fetchExistingJobs(
       uniqueJobs.map((j) => j.url),
       userId,
+      log,
     );
     if (existingMap.size > 0) {
       log(
