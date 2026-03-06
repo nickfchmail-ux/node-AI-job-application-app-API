@@ -55,13 +55,13 @@ async function analyzeOne(
     `  "fit": true or false,\n` +
     `  "score": integer from 0 to 100,\n` +
     `  "reasons": ["reason 1", "reason 2", ...],\n` +
-    `  "expectedSalary": "please access based on the market rate for the title in hong kong, and the acedemic background, qulifications and exprience inside the resume",\n` +
+    `  "expectedSalary": "HKD monthly range based on current HK market rate for this role and the candidate's qualifications",\n` +
     `  "coverLetter": "full cover letter text  (ONLY when fit is true)"\n` +
     `}\n\n` +
     `Rules:\n` +
     `- "reasons" must always be a non-empty array (strengths if fit, gaps if not fit)\n` +
     `- If fit is true:\n` +
-    `  - "expectedSalary": conservative HKD monthly range based on candidate's actual level (career changer, project-based only) and HK market rate\n` +
+    `  - "expectedSalary": realistic HKD monthly range based on the current HK market rate for this specific role, seniority level, and industry — weighted by the candidate's qualifications, skills, and experience shown in the resume. Do NOT anchor low. If the market pays HKD 25,000–40,000 for this role, say so.\n` +
     `  - "coverLetter": 3–4 realistic paragraphs, no buzzwords, addressed to the hiring team of ${job.company} for the role "${job.title}"\n` +
     `    Always close with:\n\nYours sincerely,\nFong, Chun Hong (Nick)\n+852 5108 0579\nnickfchmail@gmail.com\n` +
     `- If fit is false, omit "expectedSalary" and "coverLetter" entirely.`;
