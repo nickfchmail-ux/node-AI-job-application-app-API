@@ -213,23 +213,21 @@ async function scrapeDetailPlaywright(
 ): Promise<JobDetail> {
   const hostname = new URL(url).hostname;
 
-  // Try fetch first — maybe a transient failure in phase 1
-  const fetched = await scrapeDetailFetch(url).catch(() => null);
-  if (fetched !== null) return fetched;
-
   if (hostname.includes("jobsdb.com")) {
     const page = await browserContext.newPage();
     try {
-      await page.goto(url, { waitUntil: "networkidle", timeout: 30000 });
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
       await page
-        .waitForSelector('[data-automation="jobAdDetails"]', { timeout: 10000 })
-        .catch(() => {});
+        .waitForSelector('[data-automation="jobAdDetails"]', { timeout: 12000 });
       const text = await page.evaluate(() => {
         const el = document.querySelector('[data-automation="jobAdDetails"]');
         return el ? (el as HTMLElement).innerText : null;
       });
       if (text && text.length > 20) {
-        return { ...parseDescription(text), rawDescription: text.slice(0, 3000) };
+        return {
+          ...parseDescription(text),
+          rawDescription: text.slice(0, 3000),
+        };
       }
     } catch {
       /* fall through */
