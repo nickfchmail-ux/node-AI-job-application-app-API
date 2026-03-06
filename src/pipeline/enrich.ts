@@ -1,3 +1,4 @@
+import { chromium, type BrowserContext } from "playwright";
 import { EnrichedJob, Job, JobDetail } from "./types";
 
 function toLines(text: string): string[] {
@@ -116,14 +117,10 @@ function htmlToText(html: string): string {
     .trim();
 }
 
-const FETCH_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-  "Accept-Language": "en-US,en;q=0.9",
-};
-
-async function scrapeDetail(url: string): Promise<JobDetail> {
+async function scrapeDetail(
+  url: string,
+  browserContext?: BrowserContext,
+): Promise<JobDetail> {
   const empty: JobDetail = {
     responsibilities: [],
     requirements: [],
@@ -141,25 +138,20 @@ async function scrapeDetail(url: string): Promise<JobDetail> {
         "[Skipped — Indeed detail pages blocked by Cloudflare on Railway]",
     };
 
-  let html = "";
-  try {
-    const res = await fetch(url, {
-      headers: FETCH_HEADERS,
-      signal: AbortSignal.timeout(20000),
-    });
-    html = await res.text();
-  } catch {
-    return empty;
-  }
-
-  // ── JobsDB — extract from __NEXT_DATA__ JSON ──────────────────────────────
+  // ── JobsDB — use Playwright to bypass bot protection ─────────────────────
   if (hostname.includes("jobsdb.com")) {
-    const m = html.match(
-      /<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/,
-    );
-    if (m) {
-      try {
-        const data = JSON.parse(m[1]);
+    const ctx = browserContext;
+    if (!ctx) return empty;
+    const page = await ctx.newPage();
+    try {
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25000 });
+      await page.waitForSelector("#__NEXT_DATA__", { timeout: 10000 }).catch(() => {});
+      const nextData = await page.evaluate(() => {
+        const el = document.getElementById("__NEXT_DATA__");
+        return el?.textContent ?? null;
+      });
+      if (nextData) {
+        const data = JSON.parse(nextData);
         const job =
           data?.props?.pageProps?.jobDetail ||
           data?.props?.pageProps?.job ||
@@ -167,15 +159,30 @@ async function scrapeDetail(url: string): Promise<JobDetail> {
         const desc = job?.content || job?.jobContent || job?.description;
         if (typeof desc === "string" && desc.length > 20) {
           const raw = htmlToText(desc);
-          return {
-            ...parseDescription(raw),
-            rawDescription: raw.slice(0, 3000),
-          };
+          return { ...parseDescription(raw), rawDescription: raw.slice(0, 3000) };
         }
-      } catch {
-        /* fall through */
       }
+    } catch {
+      /* fall through */
+    } finally {
+      await page.close();
     }
+    return empty;
+  }
+
+  let html = "";
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      signal: AbortSignal.timeout(20000),
+    });
+    html = await res.text();
+  } catch {
     return empty;
   }
 
@@ -207,8 +214,21 @@ export async function enrichJobs(
   jobs: Job[],
   log: (msg: string) => void = console.log,
 ): Promise<EnrichedJob[]> {
-  const JOB_TIMEOUT_MS = 20_000;
-  const CONCURRENCY = 10;
+  const JOB_TIMEOUT_MS = 25_000;
+  const CONCURRENCY = 5;
+
+  // Launch a shared Playwright browser for JobsDB pages (bot-protected)
+  const hasJobsDb = jobs.some((j) => new URL(j.url).hostname.includes("jobsdb.com"));
+  const browser = hasJobsDb ? await chromium.launch({ headless: true }) : null;
+  const browserContext = browser
+    ? await browser.newContext({
+        userAgent:
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+          "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        locale: "en-US",
+        viewport: { width: 1280, height: 800 },
+      })
+    : undefined;
 
   const results: PromiseSettledResult<JobDetail>[] = Array(jobs.length);
   let nextIdx = 0;
@@ -220,7 +240,7 @@ export async function enrichJobs(
       const job = jobs[i];
       try {
         const detail = await Promise.race([
-          scrapeDetail(job.url),
+          scrapeDetail(job.url, browserContext),
           new Promise<never>((_, reject) =>
             setTimeout(
               () =>
@@ -243,6 +263,9 @@ export async function enrichJobs(
   }
 
   await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
+
+  await browserContext?.close();
+  await browser?.close();
 
   return jobs.map((job, i) => {
     const r = results[i];
