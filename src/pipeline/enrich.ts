@@ -137,9 +137,13 @@ const EMPTY_DETAIL: JobDetail = {
  * Phase 1 — try plain fetch. Returns null when content is absent so the job
  * can be retried with Playwright in phase 2.
  */
+// Sites that are always bot-blocked or JS-rendered — skip fetch entirely
+const PLAYWRIGHT_ONLY_HOSTS = ["jobsdb.com", "ctgoodjobs.hk", "indeed.com"];
+
 async function scrapeDetailFetch(url: string): Promise<JobDetail | null> {
   const hostname = new URL(url).hostname;
 
+  // Indeed is Cloudflare-blocked on Railway — return immediately
   if (hostname.includes("indeed.com"))
     return {
       ...EMPTY_DETAIL,
@@ -147,56 +151,22 @@ async function scrapeDetailFetch(url: string): Promise<JobDetail | null> {
         "[Skipped — Indeed detail pages blocked by Cloudflare on Railway]",
     };
 
+  // JobsDB and CTgoodjobs require a real browser — skip fetch, go straight to Playwright
+  if (PLAYWRIGHT_ONLY_HOSTS.some((h) => hostname.includes(h))) return null;
+
+  // For any other job board, attempt a plain fetch
   try {
     const res = await fetch(url, { headers: FETCH_HEADERS });
     const html = await res.text();
-
-    if (hostname.includes("jobsdb.com")) {
-      const m = html.match(
-        /<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i,
-      );
-      if (m) {
-        const data = JSON.parse(m[1]);
-        const job =
-          data?.props?.pageProps?.jobDetail ||
-          data?.props?.pageProps?.job ||
-          data?.props?.pageProps?.result;
-        const desc = job?.content || job?.jobContent || job?.description;
-        if (typeof desc === "string" && desc.length > 20) {
-          const raw = htmlToText(desc);
-          return {
-            ...parseDescription(raw),
-            rawDescription: raw.slice(0, 3000),
-          };
-        }
-      }
-      return null; // bot-blocked — retry with Playwright
-    }
-
-    if (hostname.includes("ctgoodjobs.hk")) {
-      const idMatch = html.match(/id="jd__desc"[^>]*>([\s\S]*?)<\/div>/i);
-      if (idMatch) {
-        const raw = htmlToText(idMatch[1]);
-        if (raw.length > 50)
-          return {
-            ...parseDescription(raw),
-            rawDescription: raw.slice(0, 3000),
-          };
-      }
-      const blocks = [
-        ...html.matchAll(
-          /<(?:section|article|div)[^>]*class="[^"]*(?:jd|job|desc|content)[^"]*"[^>]*>([\s\S]{200,5000}?)<\/(?:section|article|div)>/gi,
-        ),
-      ];
-      for (const b of blocks) {
-        const raw = htmlToText(b[1]);
-        if (raw.length > 100)
-          return {
-            ...parseDescription(raw),
-            rawDescription: raw.slice(0, 3000),
-          };
-      }
-      return null; // JS-rendered — retry with Playwright
+    const blocks = [
+      ...html.matchAll(
+        /<(?:section|article|div)[^>]*class="[^"]*(?:job|desc|content|detail)[^"]*"[^>]*>([\s\S]{200,5000}?)<\/(?:section|article|div)>/gi,
+      ),
+    ];
+    for (const b of blocks) {
+      const raw = htmlToText(b[1]);
+      if (raw.length > 100)
+        return { ...parseDescription(raw), rawDescription: raw.slice(0, 3000) };
     }
   } catch {
     /* fall through */
