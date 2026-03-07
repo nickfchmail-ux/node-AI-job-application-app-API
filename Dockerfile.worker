@@ -9,4 +9,4 @@ RUN npx playwright install chromium
 
 COPY . .
 
-CMD ["npx", "ts-node", "src/worker.ts"]
+CMD ["npx", "ts-node", "./src/worker.ts"]
