@@ -1,6 +1,7 @@
 import { CTgoodjobsScraper } from "./ctgoodjobs";
 import { IndeedScraper } from "./indeed";
 import { JobsDBScraper } from "./jobsdb";
+import { LinkedInScraper } from "./linkedin";
 import { Job, JobScraper } from "./types";
 
 /** Map of available board keys to their scraper constructors */
@@ -8,6 +9,7 @@ export const BOARD_MAP: Record<string, () => JobScraper> = {
   jobsdb: () => new JobsDBScraper(),
   indeed: () => new IndeedScraper(),
   ctgoodjobs: () => new CTgoodjobsScraper(),
+  linkedin: () => new LinkedInScraper(),
 };
 
 export class MultiboardScraper {

@@ -17,6 +17,7 @@ import {
 } from "./queue";
 import { redisConnection } from "./queue/redis";
 import { fetchIndeedBatchDescriptions } from "./scrapers/indeed";
+import { fetchLinkedInBatchDescriptions } from "./scrapers/linkedin";
 
 loadEnvLocal();
 
@@ -153,6 +154,31 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
       log(`✅ Pre-fetched ${attached}/${indeedJobs.length} Indeed description(s) — saving ~${attached * 5} ScraperAPI credits.`);
     } catch (err) {
       log(`⚠ Indeed batch fetch failed (will fallback to ScraperAPI): ${err}`);
+    }
+  }
+
+  // 3b. Batch-fetch LinkedIn descriptions (0 ScraperAPI credits)
+  const linkedinJobs = newJobs.filter((j) => j.url.includes("linkedin.com/jobs/view/"));
+  if (linkedinJobs.length > 0) {
+    log(`⚡ Batch-fetching ${linkedinJobs.length} LinkedIn description(s) via guest API...`);
+    const jobIdMap = new Map<string, ScrapedJob>();
+    for (const j of linkedinJobs) {
+      const match = j.url.match(/\/jobs\/view\/(\d+)/);
+      if (match) jobIdMap.set(match[1], j);
+    }
+    try {
+      const descriptions = await fetchLinkedInBatchDescriptions([...jobIdMap.keys()], log);
+      let attached = 0;
+      for (const [id, html] of Object.entries(descriptions)) {
+        const job = jobIdMap.get(id);
+        if (job && html) {
+          job.rawDetailHtml = html;
+          attached++;
+        }
+      }
+      log(`✅ Pre-fetched ${attached}/${linkedinJobs.length} LinkedIn description(s) — 0 credits used.`);
+    } catch (err) {
+      log(`⚠ LinkedIn batch fetch failed: ${err}`);
     }
   }
 

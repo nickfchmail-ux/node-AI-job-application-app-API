@@ -4,6 +4,7 @@ import {
   Job,
   JobScraper,
   JobsDBScraper,
+  LinkedInScraper,
   MultiboardScraper,
 } from "../scrapers";
 
@@ -39,16 +40,16 @@ function parseRelativeDate(raw: string | undefined): string | undefined {
   return undefined; // "Promoted", unknown — discard
 }
 
-const ALL_BOARDS = ["jobsdb", "indeed", "ctgoodjobs"] as const;
+const ALL_BOARDS = ["jobsdb", "indeed", "ctgoodjobs", "linkedin"] as const;
 type BoardKey = (typeof ALL_BOARDS)[number];
 
-// Indeed now works on Railway via ScraperAPI proxy (requires SCRAPERAPI_KEY env var).
-export const DEFAULT_BOARDS: BoardKey[] = ["jobsdb", "ctgoodjobs", "indeed"];
+export const DEFAULT_BOARDS: BoardKey[] = ["jobsdb", "ctgoodjobs", "indeed", "linkedin"];
 
 const BOARD_FACTORIES: Record<BoardKey, () => JobScraper> = {
   jobsdb: () => new JobsDBScraper(),
   indeed: () => new IndeedScraper(),
   ctgoodjobs: () => new CTgoodjobsScraper(),
+  linkedin: () => new LinkedInScraper(),
 };
 
 export async function scrapeJobs(
