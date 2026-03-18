@@ -6,7 +6,8 @@ import { Job } from "./types";
 /**
  * Batch-fetch full job descriptions from Indeed's internal RPC endpoint.
  * Returns a map of jobkey → HTML description string.
- * This endpoint works without ScraperAPI, saving ~5 credits per job.
+ * Tries direct fetch first; if blocked (403), falls back to ScraperAPI proxy
+ * (still just 1 API call for all jobs instead of N individual calls).
  */
 export async function fetchIndeedBatchDescriptions(
   jobkeys: string[],
@@ -15,28 +16,45 @@ export async function fetchIndeedBatchDescriptions(
   if (jobkeys.length === 0) return {};
   const BATCH_SIZE = 25;
   const result: Record<string, string> = {};
+  const apiKey = process.env.SCRAPERAPI_KEY;
 
   for (let i = 0; i < jobkeys.length; i += BATCH_SIZE) {
     const batch = jobkeys.slice(i, i + BATCH_SIZE);
-    const url = `https://hk.indeed.com/rpc/jobdescs?jks=${batch.join(",")}`;
+    const targetUrl = `https://hk.indeed.com/rpc/jobdescs?jks=${batch.join(",")}`;
+    const chunkNum = i / BATCH_SIZE + 1;
+    const headers = {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      Accept: "application/json",
+    };
+
     try {
-      const res = await fetch(url, {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-          Accept: "application/json",
-        },
-        signal: AbortSignal.timeout(30_000),
+      // Attempt 1: direct fetch (free, 0 credits)
+      let res = await fetch(targetUrl, {
+        headers,
+        signal: AbortSignal.timeout(15_000),
       });
+
+      // Attempt 2: if direct blocked, proxy through ScraperAPI (1 credit for whole batch)
+      if (!res.ok && apiKey) {
+        log(`[Indeed batch] chunk ${chunkNum} direct fetch ${res.status}, retrying via ScraperAPI...`);
+        const proxyUrl = `http://api.scraperapi.com?api_key=${encodeURIComponent(apiKey)}&url=${encodeURIComponent(targetUrl)}`;
+        res = await fetch(proxyUrl, {
+          headers,
+          signal: AbortSignal.timeout(60_000),
+        });
+      }
+
       if (!res.ok) {
-        log(`[Indeed batch] chunk ${i / BATCH_SIZE + 1} failed: ${res.status}`);
+        log(`[Indeed batch] chunk ${chunkNum} failed: ${res.status}`);
         continue;
       }
       const data = await res.json() as Record<string, string>;
       Object.assign(result, data);
+      log(`[Indeed batch] chunk ${chunkNum}: got ${Object.keys(data).length} descriptions`);
     } catch (err) {
-      log(`[Indeed batch] chunk ${i / BATCH_SIZE + 1} error: ${err}`);
+      log(`[Indeed batch] chunk ${chunkNum} error: ${err}`);
     }
   }
   return result;
