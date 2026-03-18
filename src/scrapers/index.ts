@@ -6,3 +6,4 @@ export { LinkedInScraper } from "./linkedin";
 export { BOARD_MAP, MultiboardScraper } from "./multiboard";
 export { DomSelectors, Job, JobScraper } from "./types";
 export { printJobs, saveResults } from "./utils";
+
