@@ -39,7 +39,7 @@ export class OfferTodayScraper extends BaseJobScraper {
             method: "POST",
             headers: OfferTodayScraper.FETCH_HEADERS,
             body: JSON.stringify({
-              query: keyword.trim(),
+              keyword: keyword.trim(),
               page: p,
               pageSize: OfferTodayScraper.PAGE_SIZE,
             }),
