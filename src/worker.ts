@@ -287,6 +287,37 @@ async function processOneJob(job: Job<ProcessJobData>) {
   await upsertToSupabase([analysed], safeKeyword, scrapedDate, log, userId);
   log(`✓ Persisted to Supabase.`);
 
+  // 4. Remove older duplicates (same user_id + title + company), keep newest
+  if (userId && analysed.title && analysed.company) {
+    try {
+      const supabase = getSupabaseClient();
+      // Find all rows matching this user+title+company, ordered by created_at desc
+      const { data: dupes, error: fetchErr } = await supabase
+        .from("jobs")
+        .select("id, created_at")
+        .eq("user_id", userId)
+        .eq("title", analysed.title)
+        .eq("company", analysed.company)
+        .order("created_at", { ascending: false });
+
+      if (!fetchErr && dupes && dupes.length > 1) {
+        // Keep the first (newest), delete the rest
+        const idsToDelete = dupes.slice(1).map((d) => d.id);
+        const { error: delErr } = await supabase
+          .from("jobs")
+          .delete()
+          .in("id", idsToDelete);
+        if (delErr) {
+          log(`⚠ Dedup delete error: ${delErr.message}`);
+        } else {
+          log(`🗑  Removed ${idsToDelete.length} older duplicate(s) for "${analysed.title} @ ${analysed.company}".`);
+        }
+      }
+    } catch (err) {
+      log(`⚠ Dedup cleanup failed: ${err}`);
+    }
+  }
+
   return {
     title: analysed.title,
     company: analysed.company,
