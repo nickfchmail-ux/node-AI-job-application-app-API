@@ -205,7 +205,36 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
     }
   }
 
-  // 4. Fan-out: create one "process-job" per listing
+  // 4. Remove old duplicates (same user_id + title + company) before inserting fresh data
+  if (userId) {
+    const supabase = getSupabaseClient();
+    const pairs = newJobs.map((j) => ({ title: j.title, company: j.company }));
+    // Deduplicate the pairs to minimise queries
+    const uniquePairs = [...new Map(pairs.map((p) => [`${p.title}|||${p.company}`, p])).values()];
+    const BATCH_DEL = 20;
+    let totalDeleted = 0;
+    for (let i = 0; i < uniquePairs.length; i += BATCH_DEL) {
+      const batch = uniquePairs.slice(i, i + BATCH_DEL);
+      for (const { title, company } of batch) {
+        const { count, error } = await supabase
+          .from("jobs")
+          .delete({ count: "exact" })
+          .eq("user_id", userId)
+          .eq("title", title)
+          .eq("company", company);
+        if (error) {
+          log(`⚠ Dedup delete error (${title} @ ${company}): ${error.message}`);
+        } else if (count && count > 0) {
+          totalDeleted += count;
+        }
+      }
+    }
+    if (totalDeleted > 0) {
+      log(`🗑  Removed ${totalDeleted} old duplicate(s) (same title+company).`);
+    }
+  }
+
+  // 5. Fan-out: create one "process-job" per listing
   log(`Dispatching ${newJobs.length} individual processing jobs...`);
   const childJobIds: string[] = [];
   for (const scrapedJob of newJobs) {
